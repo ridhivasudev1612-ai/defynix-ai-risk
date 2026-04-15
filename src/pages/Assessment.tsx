@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { defaultAssessmentInput } from '@/lib/mockData';
-import { computeRisk, type AssessmentInput } from '@/lib/riskEngine';
+import { computeRisk, maskUpiId, hashUpiId, type AssessmentInput } from '@/lib/riskEngine';
 import RiskGauge from '@/components/RiskGauge';
 import RiskBreakdown from '@/components/RiskBreakdown';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid } from 'recharts';
@@ -181,36 +181,100 @@ const Assessment = () => {
             {step === 2 && (
               <div className="space-y-4">
                 <h2 className="font-heading font-semibold text-lg text-foreground mb-4">UPI Behaviour Analysis</h2>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className={labelClass}>Monthly Transactions</label>
-                    <input className={inputClass} type="number" value={data.upi.monthlyTransactions} onChange={e => updateUPI('monthlyTransactions', +e.target.value)} />
-                  </div>
-                  <div>
-                    <label className={labelClass}>Avg Transaction (₹)</label>
-                    <input className={inputClass} type="number" value={data.upi.avgTransactionAmount} onChange={e => updateUPI('avgTransactionAmount', +e.target.value)} />
+
+                {/* Privacy consent banner */}
+                <div className={`p-4 rounded-lg border ${data.upi.consentGiven ? 'border-success/30 bg-success/5' : 'border-warning/30 bg-warning/5'}`}>
+                  <div className="flex items-start gap-3">
+                    <span className="text-lg mt-0.5">{data.upi.consentGiven ? '✅' : '🔒'}</span>
+                    <div className="flex-1">
+                      <h4 className="font-heading font-semibold text-sm text-foreground mb-1">
+                        {data.upi.consentGiven ? 'Consent Granted — Account Aggregator Framework' : 'UPI Data Consent Required'}
+                      </h4>
+                      <p className="text-xs text-muted-foreground leading-relaxed mb-3">
+                        Per RBI Account Aggregator (AA) framework guidelines, explicit user consent is required before accessing UPI transaction data. 
+                        Data is processed in encrypted form — <strong>raw UPI IDs are never stored</strong>. Only hashed identifiers and aggregated behavioral patterns are retained.
+                      </p>
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <div
+                          className={`w-10 h-6 rounded-full transition-colors relative ${data.upi.consentGiven ? 'bg-success' : 'bg-muted'}`}
+                          onClick={() => updateUPI('consentGiven', !data.upi.consentGiven)}
+                        >
+                          <div className={`w-4 h-4 rounded-full absolute top-1 transition-all ${data.upi.consentGiven ? 'left-5 bg-success-foreground' : 'left-1 bg-muted-foreground'}`} />
+                        </div>
+                        <span className="text-sm font-medium text-secondary-foreground">I consent to UPI transaction analysis under AA framework</span>
+                      </label>
+                    </div>
                   </div>
                 </div>
+
+                {/* UPI ID with masking */}
                 <div>
-                  <label className={labelClass}>Late-Night Transactions (%)</label>
-                  <input className={inputClass} type="number" value={data.upi.lateNightTransactions} onChange={e => updateUPI('lateNightTransactions', +e.target.value)} />
-                </div>
-                <div className="space-y-3 pt-2">
-                  {([
-                    ['gamblingAppUsage', 'Gambling / Betting App Usage Detected'],
-                    ['cryptoTransactions', 'Cryptocurrency Transactions Detected'],
-                    ['p2pLendingUsage', 'P2P Lending Platform Usage'],
-                  ] as [string, string][]).map(([key, label]) => (
-                    <label key={key} className="flex items-center gap-3 cursor-pointer">
-                      <div
-                        className={`w-10 h-6 rounded-full transition-colors relative ${(data.upi as any)[key] ? 'bg-primary' : 'bg-muted'}`}
-                        onClick={() => updateUPI(key, !(data.upi as any)[key])}
-                      >
-                        <div className={`w-4 h-4 rounded-full absolute top-1 transition-all ${(data.upi as any)[key] ? 'left-5 bg-primary-foreground' : 'left-1 bg-muted-foreground'}`} />
+                  <label className={labelClass}>UPI ID (auto-masked for privacy)</label>
+                  <div className="relative">
+                    <input
+                      className={inputClass}
+                      placeholder="yourname@upi"
+                      value={data.upi.upiId || ''}
+                      onChange={e => updateUPI('upiId', e.target.value)}
+                      disabled={!data.upi.consentGiven}
+                    />
+                    {data.upi.upiId && (
+                      <div className="mt-2 flex items-center gap-4 text-xs">
+                        <span className="text-muted-foreground">Masked: <span className="font-mono text-primary">{maskUpiId(data.upi.upiId as string)}</span></span>
+                        <span className="text-muted-foreground">Hash: <span className="font-mono text-primary">{hashUpiId(data.upi.upiId as string)}</span></span>
                       </div>
-                      <span className="text-sm text-secondary-foreground">{label}</span>
-                    </label>
-                  ))}
+                    )}
+                  </div>
+                </div>
+
+                {!data.upi.consentGiven && (
+                  <div className="p-3 rounded-lg border border-border bg-muted/50 text-xs text-muted-foreground">
+                    ⚠️ UPI analysis fields are disabled until consent is granted. Risk assessment will use limited data without UPI behavioral signals.
+                  </div>
+                )}
+
+                <div className={`space-y-4 ${!data.upi.consentGiven ? 'opacity-40 pointer-events-none' : ''}`}>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className={labelClass}>Monthly Transactions</label>
+                      <input className={inputClass} type="number" value={data.upi.monthlyTransactions} onChange={e => updateUPI('monthlyTransactions', +e.target.value)} />
+                    </div>
+                    <div>
+                      <label className={labelClass}>Avg Transaction (₹)</label>
+                      <input className={inputClass} type="number" value={data.upi.avgTransactionAmount} onChange={e => updateUPI('avgTransactionAmount', +e.target.value)} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className={labelClass}>Late-Night Transactions (%)</label>
+                    <input className={inputClass} type="number" value={data.upi.lateNightTransactions} onChange={e => updateUPI('lateNightTransactions', +e.target.value)} />
+                  </div>
+                  <div className="space-y-3 pt-2">
+                    {([
+                      ['gamblingAppUsage', 'Gambling / Betting App Usage Detected'],
+                      ['cryptoTransactions', 'Cryptocurrency Transactions Detected'],
+                      ['p2pLendingUsage', 'P2P Lending Platform Usage'],
+                    ] as [string, string][]).map(([key, label]) => (
+                      <label key={key} className="flex items-center gap-3 cursor-pointer">
+                        <div
+                          className={`w-10 h-6 rounded-full transition-colors relative ${(data.upi as any)[key] ? 'bg-primary' : 'bg-muted'}`}
+                          onClick={() => updateUPI(key, !(data.upi as any)[key])}
+                        >
+                          <div className={`w-4 h-4 rounded-full absolute top-1 transition-all ${(data.upi as any)[key] ? 'left-5 bg-primary-foreground' : 'left-1 bg-muted-foreground'}`} />
+                        </div>
+                        <span className="text-sm text-secondary-foreground">{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Data handling notice */}
+                <div className="p-3 rounded-lg border border-border bg-card text-xs text-muted-foreground space-y-1.5">
+                  <div className="font-heading font-semibold text-secondary-foreground">🔐 Data Privacy Notice</div>
+                  <p>• UPI IDs are hashed using SHA-256 before storage — plaintext IDs are never persisted</p>
+                  <p>• Transaction data is aggregated into behavioral patterns only</p>
+                  <p>• Individual transaction details are not stored or visible to risk analysts</p>
+                  <p>• Compliant with RBI Account Aggregator framework & DPDP Act 2023</p>
+                  <p>• Consent can be revoked at any time — data will be purged within 48 hours</p>
                 </div>
               </div>
             )}
