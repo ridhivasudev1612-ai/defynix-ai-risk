@@ -5,9 +5,14 @@ const navItems = [
   { path: '/', label: 'Home' },
   { path: '/assess', label: 'Risk Assessment' },
   { path: '/monitoring', label: 'Monitoring' },
+  { path: '/guarantor-chain', label: 'Guarantor Chain' },
 ];
 
-const AppHeader = () => {
+interface AppHeaderProps {
+  onOpenAlerts?: () => void;
+}
+
+const AppHeader = ({ onOpenAlerts }: AppHeaderProps) => {
   const location = useLocation();
 
   return (
@@ -20,26 +25,39 @@ const AppHeader = () => {
           <span className="font-heading font-bold text-lg text-foreground tracking-tight">DEFYNIX</span>
         </Link>
 
-        <nav className="flex items-center gap-1">
-          {navItems.map(item => (
-            <Link
-              key={item.path}
-              to={item.path}
-              className="relative px-4 py-2 text-sm font-medium transition-colors"
-            >
-              {location.pathname === item.path && (
-                <motion.div
-                  layoutId="nav-active"
-                  className="absolute inset-0 rounded-lg bg-secondary"
-                  transition={{ type: 'spring', bounce: 0.2, duration: 0.5 }}
-                />
-              )}
-              <span className={`relative z-10 ${location.pathname === item.path ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-                {item.label}
-              </span>
-            </Link>
-          ))}
-        </nav>
+        <div className="flex items-center gap-1">
+          <nav className="flex items-center gap-1">
+            {navItems.map(item => (
+              <Link
+                key={item.path}
+                to={item.path}
+                className="relative px-3 py-2 text-sm font-medium transition-colors"
+              >
+                {location.pathname === item.path && (
+                  <motion.div
+                    layoutId="nav-active"
+                    className="absolute inset-0 rounded-lg bg-secondary"
+                    transition={{ type: 'spring', bounce: 0.2, duration: 0.5 }}
+                  />
+                )}
+                <span className={`relative z-10 ${location.pathname === item.path ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                  {item.label}
+                </span>
+              </Link>
+            ))}
+          </nav>
+
+          {/* Alerts button */}
+          <button
+            onClick={onOpenAlerts}
+            className="relative ml-2 w-9 h-9 rounded-lg border border-border bg-card flex items-center justify-center text-muted-foreground hover:text-foreground hover:border-primary/30 transition-all"
+          >
+            🔔
+            <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-destructive flex items-center justify-center">
+              <span className="text-[8px] font-bold text-destructive-foreground">3</span>
+            </span>
+          </button>
+        </div>
       </div>
     </header>
   );

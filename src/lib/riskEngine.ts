@@ -18,12 +18,36 @@ export interface FinancialData {
 }
 
 export interface UPIData {
+  upiId?: string; // masked/hashed — never stored in plaintext
+  consentGiven: boolean;
   monthlyTransactions: number;
   avgTransactionAmount: number;
   lateNightTransactions: number; // % of total
   gamblingAppUsage: boolean;
   cryptoTransactions: boolean;
   p2pLendingUsage: boolean;
+}
+
+// UPI ID Privacy utilities
+export function maskUpiId(upiId: string): string {
+  if (!upiId || upiId.length < 4) return '****@upi';
+  const parts = upiId.split('@');
+  if (parts.length !== 2) return '****@upi';
+  const handle = parts[0];
+  const provider = parts[1];
+  const masked = handle.slice(0, 2) + '*'.repeat(Math.max(handle.length - 2, 3));
+  return `${masked}@${provider}`;
+}
+
+export function hashUpiId(upiId: string): string {
+  // Simulated SHA-256 hash — in production use crypto.subtle.digest
+  let hash = 0;
+  for (let i = 0; i < upiId.length; i++) {
+    const char = upiId.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0;
+  }
+  return 'UPI_' + Math.abs(hash).toString(16).toUpperCase().padStart(8, '0');
 }
 
 export interface InsuranceData {
