@@ -5,6 +5,7 @@ const navItems = [
   { path: '/', label: 'Home' },
   { path: '/assess', label: 'Risk Assessment' },
   { path: '/monitoring', label: 'Monitoring' },
+  { path: '/guarantor-chain', label: 'Guarantor Chain' },
 ];
 
 const AppHeader = () => {
