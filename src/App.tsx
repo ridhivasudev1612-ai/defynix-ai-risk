@@ -10,6 +10,7 @@ import Index from "./pages/Index";
 import Assessment from "./pages/Assessment";
 import Monitoring from "./pages/Monitoring";
 import GuarantorChain from "./pages/GuarantorChain";
+import PeerComparison from "./pages/PeerComparison";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -30,6 +31,7 @@ const App = () => {
             <Route path="/assess" element={<Assessment />} />
             <Route path="/monitoring" element={<Monitoring />} />
             <Route path="/guarantor-chain" element={<GuarantorChain />} />
+            <Route path="/peer-comparison" element={<PeerComparison />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
