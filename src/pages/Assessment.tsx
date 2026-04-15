@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { defaultAssessmentInput } from '@/lib/mockData';
+import { addCustomBorrower } from '@/lib/storage';
 import { computeRisk, maskUpiId, hashUpiId, type AssessmentInput } from '@/lib/riskEngine';
 import RiskGauge from '@/components/RiskGauge';
 import RiskBreakdown from '@/components/RiskBreakdown';
@@ -15,8 +16,39 @@ const Assessment = () => {
   const [result, setResult] = useState<ReturnType<typeof computeRisk> | null>(null);
   const navigate = useNavigate();
 
-  const updatePersonal = (key: string, value: string | number) =>
-    setData(d => ({ ...d, personal: { ...d.personal, [key]: value } }));
+  const OTP_API_URL = import.meta.env.VITE_OTP_API_URL ?? '';
+  const isOtpBackendConfigured = Boolean(OTP_API_URL);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [emailOtpCode, setEmailOtpCode] = useState('');
+  const [phoneOtpCode, setPhoneOtpCode] = useState('');
+  const [enteredEmailOtp, setEnteredEmailOtp] = useState('');
+  const [enteredPhoneOtp, setEnteredPhoneOtp] = useState('');
+  const [otpMessage, setOtpMessage] = useState('');
+  const [otpRequestId, setOtpRequestId] = useState<string | null>(null);
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
+
+  const calculateAgeFromDob = (dob: string) => {
+    const birth = new Date(dob);
+    if (Number.isNaN(birth.getTime())) return 0;
+    const today = new Date();
+    let age = today.getUTCFullYear() - birth.getUTCFullYear();
+    const monthDiff = today.getUTCMonth() - birth.getUTCMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getUTCDate() < birth.getUTCDate())) {
+      age -= 1;
+    }
+    return Math.max(age, 0);
+  };
+
+  const updatePersonal = (key: string, value: string | number | boolean) =>
+    setData(d => ({
+      ...d,
+      personal: {
+        ...d.personal,
+        [key]: value,
+        ...(key === 'email' ? { emailVerified: false } : {}),
+        ...(key === 'phone' ? { phoneVerified: false } : {}),
+      },
+    }));
   const updateFinancial = (key: string, value: number) =>
     setData(d => ({ ...d, financial: { ...d.financial, [key]: value } }));
   const updateUPI = (key: string, value: number | boolean | string) =>
@@ -24,9 +56,202 @@ const Assessment = () => {
   const updateInsurance = (key: string, value: boolean | number) =>
     setData(d => ({ ...d, insurance: { ...d.insurance, [key]: value } }));
 
+  const handleDobChange = (value: string) => {
+    const newAge = calculateAgeFromDob(value);
+    setData(d => ({ ...d, personal: { ...d.personal, dob: value, age: newAge } }));
+  };
+
+  const otpChannelLabel = (channel: 'email' | 'phone') => channel === 'email' ? 'Email' : 'Phone';
+
+  const validateOtpContact = (channel: 'email' | 'phone') => {
+    if (channel === 'email') {
+      if (!data.personal.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.personal.email)) {
+        return 'Enter a valid email to send OTP.';
+      }
+    } else {
+      if (!data.personal.phone.trim() || data.personal.phone.trim().length < 10) {
+        return 'Enter a valid phone number to send OTP.';
+      }
+    }
+    return null;
+  };
+
+  const sendOtp = async (channel: 'email' | 'phone') => {
+    const validation = validateOtpContact(channel);
+    if (validation) {
+      setValidationError(validation);
+      return;
+    }
+
+    setIsSendingOtp(true);
+    setValidationError(null);
+    setOtpRequestId(null);
+
+    const value = channel === 'email' ? data.personal.email : data.personal.phone;
+    const label = otpChannelLabel(channel);
+
+    if (OTP_API_URL) {
+      try {
+        const response = await fetch(`${OTP_API_URL}/otp/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channel, value, whatsappLinked: data.personal.whatsappLinked }),
+        });
+
+        if (!response.ok) {
+          throw new Error(await response.text() || 'OTP service responded with an error.');
+        }
+
+        const result = await response.json();
+        setOtpRequestId(result.requestId || null);
+        setOtpMessage(`${label} OTP sent to ${value}. Check your inbox/messages.`);
+      } catch (error) {
+        console.error(error);
+        const code = String(Math.floor(1000 + Math.random() * 9000));
+        if (channel === 'email') {
+          setEmailOtpCode(code);
+        } else {
+          setPhoneOtpCode(code);
+        }
+        setOtpMessage(`Unable to reach OTP service, generated fallback ${label} OTP locally.`);
+      } finally {
+        setIsSendingOtp(false);
+      }
+      return;
+    }
+
+    const fallbackCode = String(Math.floor(1000 + Math.random() * 9000));
+    if (channel === 'email') {
+      setEmailOtpCode(fallbackCode);
+    } else {
+      setPhoneOtpCode(fallbackCode);
+    }
+    setOtpMessage(`Simulated ${label} OTP generated. Use the code shown below or configure VITE_OTP_API_URL for a real backend provider.`);
+    setIsSendingOtp(false);
+  };
+
+  const verifyOtp = async (channel: 'email' | 'phone') => {
+    const enteredCode = channel === 'email' ? enteredEmailOtp.trim() : enteredPhoneOtp.trim();
+    if (!enteredCode) {
+      setValidationError(`Enter the ${channel} OTP to verify.`);
+      return;
+    }
+
+    setIsSendingOtp(true);
+    setValidationError(null);
+
+    if (OTP_API_URL && otpRequestId) {
+      try {
+        const response = await fetch(`${OTP_API_URL}/otp/verify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requestId: otpRequestId, channel, value: channel === 'email' ? data.personal.email : data.personal.phone, code: enteredCode }),
+        });
+
+        if (!response.ok) {
+          throw new Error(await response.text() || 'OTP verification failed.');
+        }
+
+        const result = await response.json();
+        if (!result.verified) {
+          throw new Error(result.message || 'Invalid OTP entered.');
+        }
+
+        updatePersonal(channel === 'email' ? 'emailVerified' : 'phoneVerified', true);
+        setOtpMessage(`${otpChannelLabel(channel)} verified successfully.`);
+      } catch (error) {
+        setValidationError(error instanceof Error ? error.message : 'OTP verification failed.');
+      } finally {
+        setIsSendingOtp(false);
+      }
+      return;
+    }
+
+    const expectedCode = channel === 'email' ? emailOtpCode : phoneOtpCode;
+    if (!expectedCode) {
+      setValidationError(`Please send the ${channel} OTP first.`);
+      setIsSendingOtp(false);
+      return;
+    }
+    if (enteredCode !== expectedCode) {
+      setValidationError(`Incorrect ${channel} OTP.`);
+      setIsSendingOtp(false);
+      return;
+    }
+
+    updatePersonal(channel === 'email' ? 'emailVerified' : 'phoneVerified', true);
+    setOtpMessage(`${otpChannelLabel(channel)} verified successfully.`);
+    setIsSendingOtp(false);
+  };
+
+  const validateStep = (currentStep: number) => {
+    if (currentStep === 0) {
+      if (!data.personal.name.trim()) return 'Full name is required.';
+      if (!data.personal.dob.trim()) return 'Date of birth is required.';
+      if (!data.personal.phone.trim()) return 'Phone number is required.';
+      if (!data.personal.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.personal.email)) return 'Valid email is required.';
+      if (!data.personal.gender.trim()) return 'Gender is required.';
+      if (!data.personal.nationality.trim()) return 'Nationality is required.';
+      if (!data.personal.panNumber.trim()) return 'PAN number is required.';
+      if (!data.personal.panName.trim()) return 'PAN card name is required.';
+      if (data.personal.name.trim().toLowerCase() !== data.personal.panName.trim().toLowerCase()) {
+        return 'Full name does not match the name on the PAN card.';
+      }
+      if (!data.personal.age || data.personal.age <= 0) return 'Valid calculated age is required.';
+      if (!data.personal.occupation.trim()) return 'Occupation is required.';
+      if (!data.personal.city.trim()) return 'City is required.';
+      if (!data.personal.emailVerified || !data.personal.phoneVerified) return 'Verify your email and phone via OTP before continuing.';
+      return null;
+    }
+
+    if (currentStep === 1) {
+      if (data.financial.monthlyIncome <= 0) return 'Monthly income is required.';
+      if (data.financial.monthlyExpenses < 0) return 'Monthly expenses must be zero or more.';
+      if (data.financial.existingEMIs < 0) return 'Existing EMIs must be zero or more.';
+      if (data.financial.loanAmount <= 0) return 'Loan amount is required.';
+      if (data.financial.loanTenure <= 0) return 'Loan tenure is required.';
+      return null;
+    }
+
+    if (currentStep === 2) {
+      if (!data.upi.consentGiven) return 'Please grant UPI consent to continue.';
+      if (!data.upi.upiId?.trim()) return 'UPI ID is required.';
+      if (data.upi.monthlyTransactions <= 0) return 'Monthly transactions are required.';
+      if (data.upi.avgTransactionAmount <= 0) return 'Average transaction amount is required.';
+      if (data.upi.lateNightTransactions < 0) return 'Late-night transaction percentage must be zero or more.';
+      return null;
+    }
+
+    if (currentStep === 3) {
+      if (data.insurance.hasGuarantor && data.insurance.guarantorCreditScore <= 0) return 'Guarantor credit score is required when a guarantor is provided.';
+      return null;
+    }
+
+    return null;
+  };
+
+  const handleNext = () => {
+    const error = validateStep(step);
+    if (error) {
+      setValidationError(error);
+      return;
+    }
+    setValidationError(null);
+    setStep(s => Math.min(s + 1, steps.length - 1));
+  };
+
   const handleSubmit = () => {
+    const error = validateStep(step);
+    if (error) {
+      setValidationError(error);
+      return;
+    }
+
     const r = computeRisk(data);
     setResult(r);
+    setValidationError(null);
+
+    addCustomBorrower({ id: `BRW-${Date.now()}`, ...data });
   };
 
   const inputClass = "w-full px-4 py-3 rounded-lg border border-border bg-muted text-foreground font-body text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 transition";
@@ -141,10 +366,59 @@ const Assessment = () => {
                   <label className={labelClass}>Full Name</label>
                   <input className={inputClass} placeholder="Enter full name" value={data.personal.name} onChange={e => updatePersonal('name', e.target.value)} />
                 </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelClass}>Date of Birth</label>
+                    <input className={inputClass} type="date" value={data.personal.dob} onChange={e => handleDobChange(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className={labelClass}>Phone Number</label>
+                    <input className={inputClass} placeholder="e.g. +91 98765 43210" value={data.personal.phone} onChange={e => updatePersonal('phone', e.target.value)} />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelClass}>Email ID</label>
+                    <input className={inputClass} type="email" placeholder="Enter email" value={data.personal.email} onChange={e => updatePersonal('email', e.target.value)} />
+                  </div>
+                  <div>
+                    <label className={labelClass}>Gender</label>
+                    <select className={inputClass} value={data.personal.gender} onChange={e => updatePersonal('gender', e.target.value)}>
+                      <option value="">Select gender</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Non-binary">Non-binary</option>
+                      <option value="Other">Other</option>
+                      <option value="Prefer not to say">Prefer not to say</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelClass}>Nationality</label>
+                    <select className={inputClass} value={data.personal.nationality} onChange={e => updatePersonal('nationality', e.target.value)}>
+                      <option value="">Select nationality</option>
+                      <option value="Indian">Indian</option>
+                      <option value="American">American</option>
+                      <option value="British">British</option>
+                      <option value="Canadian">Canadian</option>
+                      <option value="Australian">Australian</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelClass}>PAN Number</label>
+                    <input className={inputClass} placeholder="PAN number" value={data.personal.panNumber} onChange={e => updatePersonal('panNumber', e.target.value)} />
+                  </div>
+                </div>
+                <div>
+                  <label className={labelClass}>PAN Card Name</label>
+                  <input className={inputClass} placeholder="Name on PAN card" value={data.personal.panName} onChange={e => updatePersonal('panName', e.target.value)} />
+                </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className={labelClass}>Age</label>
-                    <input className={inputClass} type="number" value={data.personal.age} onChange={e => updatePersonal('age', +e.target.value)} />
+                    <label className={labelClass}>Age (auto-calculated)</label>
+                    <input className={inputClass} type="number" value={data.personal.age} readOnly />
                   </div>
                   <div>
                     <label className={labelClass}>City</label>
@@ -155,6 +429,47 @@ const Assessment = () => {
                   <label className={labelClass}>Occupation</label>
                   <input className={inputClass} placeholder="Occupation" value={data.personal.occupation} onChange={e => updatePersonal('occupation', e.target.value)} />
                 </div>
+
+                <div className="rounded-lg border border-border bg-muted p-4">
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className={labelClass}>Email Verification</label>
+                      <button onClick={() => sendOtp('email')} disabled={isSendingOtp} className="text-xs text-primary hover:underline disabled:opacity-40">Send OTP</button>
+                    </div>
+                    <input className={inputClass} type="text" placeholder="Enter email OTP" value={enteredEmailOtp} onChange={e => setEnteredEmailOtp(e.target.value)} />
+                    <button onClick={() => verifyOtp('email')} disabled={isSendingOtp} className="mt-2 w-full px-3 py-2 rounded-lg bg-primary text-primary-foreground text-sm disabled:opacity-40">Verify</button>
+                    {!isOtpBackendConfigured && emailOtpCode && !data.personal.emailVerified && <p className="text-xs text-muted-foreground mt-2">Simulated OTP: {emailOtpCode}</p>}
+                    {data.personal.emailVerified && <p className="text-xs text-success mt-2">Email verified</p>}
+                  </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className={labelClass}>Phone Verification</label>
+                        <button onClick={() => sendOtp('phone')} disabled={isSendingOtp} className="text-xs text-primary hover:underline disabled:opacity-40">Send OTP</button>
+                      </div>
+                      <input className={inputClass} type="text" placeholder="Enter phone OTP" value={enteredPhoneOtp} onChange={e => setEnteredPhoneOtp(e.target.value)} />
+                      <button onClick={() => verifyOtp('phone')} disabled={isSendingOtp} className="mt-2 w-full px-3 py-2 rounded-lg bg-primary text-primary-foreground text-sm disabled:opacity-40">Verify</button>
+                      {!isOtpBackendConfigured && phoneOtpCode && !data.personal.phoneVerified && <p className="text-xs text-muted-foreground mt-2">Simulated OTP: {phoneOtpCode}</p>}
+                    </div>
+
+                    <div>
+                      <label className={labelClass}>WhatsApp Linked</label>
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input type="checkbox" checked={data.personal.whatsappLinked} onChange={e => updatePersonal('whatsappLinked', e.target.checked)} className="h-4 w-4" />
+                        <span className="text-sm text-secondary-foreground">This phone number is linked to WhatsApp</span>
+                      </label>
+                    </div>
+                  </div>
+                  {otpMessage && <p className="text-xs text-muted-foreground mt-3">{otpMessage}</p>}
+                  {!isOtpBackendConfigured && (
+                    <p className="text-xs text-muted-foreground mt-2">Real OTP delivery is not configured. Use VITE_OTP_API_URL with a backend provider to enable email/SMS OTP sending.</p>
+                  )}
+                </div>
+
+                {data.personal.name.trim() && data.personal.panName.trim() && data.personal.name.trim().toLowerCase() !== data.personal.panName.trim().toLowerCase() && (
+                  <div className="text-sm text-destructive">Warning: entered name does not match name on PAN card.</div>
+                )}
               </div>
             )}
 
@@ -167,8 +482,6 @@ const Assessment = () => {
                   ['existingEMIs', 'Existing EMIs (₹)'],
                   ['loanAmount', 'Loan Amount (₹)'],
                   ['loanTenure', 'Loan Tenure (months)'],
-                  ['savingsBalance', 'Savings Balance (₹)'],
-                  ['creditCardOutstanding', 'Credit Card Outstanding (₹)'],
                 ] as [string, string][]).map(([key, label]) => (
                   <div key={key}>
                     <label className={labelClass}>{label}</label>
@@ -311,6 +624,12 @@ const Assessment = () => {
           </motion.div>
         </AnimatePresence>
 
+        {validationError && (
+          <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {validationError}
+          </div>
+        )}
+
         {/* Navigation */}
         <div className="flex justify-between mt-6">
           <button
@@ -322,7 +641,7 @@ const Assessment = () => {
           </button>
           {step < steps.length - 1 ? (
             <button
-              onClick={() => setStep(s => s + 1)}
+              onClick={handleNext}
               className="px-6 py-2.5 rounded-lg gradient-primary text-primary-foreground text-sm font-medium shadow-glow hover:opacity-90 transition-opacity"
             >
               Continue

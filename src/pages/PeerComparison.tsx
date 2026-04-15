@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { loadCustomBorrowers, type StoredBorrower } from '@/lib/storage';
 import { mockBorrowers } from '@/lib/mockData';
 import { computeRisk } from '@/lib/riskEngine';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Legend } from 'recharts';
@@ -28,46 +29,57 @@ const cohorts = [
 ];
 
 const PeerComparison = () => {
-  const borrowerResults = mockBorrowers.map(b => {
-    const result = computeRisk(b);
-    const emiBurden = Math.round((b.financial.existingEMIs / b.financial.monthlyIncome) * 100);
-    const savingsRatio = Math.round((b.financial.savingsBalance / (b.financial.monthlyIncome * 6)) * 100);
-    return {
-      id: b.id,
-      name: b.personal.name,
-      city: b.personal.city,
-      occupation: b.personal.occupation,
-      income: b.financial.monthlyIncome,
-      riskScore: result.totalScore,
-      riskLevel: result.riskLevel,
-      emiBurden,
-      savingsRatio: Math.min(savingsRatio, 100),
-      protectionScore: Math.round(100 - result.factors.filter(f => f.category === 'Protection').reduce((s, f) => s + f.score, 0) / Math.max(result.factors.filter(f => f.category === 'Protection').length, 1)),
-      upiRisk: Math.round(result.factors.filter(f => f.category === 'UPI Behaviour').reduce((s, f) => s + f.score, 0) / Math.max(result.factors.filter(f => f.category === 'UPI Behaviour').length, 1)),
-      cohort: b.personal.occupation.includes('Engineer') ? cohorts[0].name
-        : b.personal.occupation.includes('Marketing') ? cohorts[1].name
-        : b.personal.occupation.includes('Business') ? cohorts[2].name
-        : b.personal.occupation.includes('Freelance') ? cohorts[3].name
-        : cohorts[4].name,
-    } as PeerProfile;
-  });
+  const [borrowerResults, setBorrowerResults] = useState<PeerProfile[]>([]);
 
-  const [selected, setSelected] = useState<PeerProfile>(borrowerResults[0]);
+  useEffect(() => {
+    const customBorrowers = loadCustomBorrowers();
+    const combined = [...mockBorrowers, ...customBorrowers].map(b => {
+      const result = computeRisk(b as any);
+      const emiBurden = Math.round((b.financial.existingEMIs / b.financial.monthlyIncome) * 100);
+      const savingsRatio = Math.round((b.financial.savingsBalance / (b.financial.monthlyIncome * 6)) * 100);
+      return {
+        id: b.id,
+        name: b.personal.name,
+        city: b.personal.city,
+        occupation: b.personal.occupation,
+        income: b.financial.monthlyIncome,
+        riskScore: result.totalScore,
+        riskLevel: result.riskLevel,
+        emiBurden,
+        savingsRatio: Math.min(savingsRatio, 100),
+        protectionScore: Math.round(100 - result.factors.filter(f => f.category === 'Protection').reduce((s, f) => s + f.score, 0) / Math.max(result.factors.filter(f => f.category === 'Protection').length, 1)),
+        upiRisk: Math.round(result.factors.filter(f => f.category === 'UPI Behaviour').reduce((s, f) => s + f.score, 0) / Math.max(result.factors.filter(f => f.category === 'UPI Behaviour').length, 1)),
+        cohort: b.personal.occupation.includes('Engineer') ? cohorts[0].name
+          : b.personal.occupation.includes('Marketing') ? cohorts[1].name
+          : b.personal.occupation.includes('Business') ? cohorts[2].name
+          : b.personal.occupation.includes('Freelance') ? cohorts[3].name
+          : cohorts[4].name,
+      } as PeerProfile;
+    });
+    setBorrowerResults(combined);
+    if (combined.length > 0) {
+      setSelected(combined[0]);
+    }
+  }, []);
 
-  const selectedCohort = cohorts.find(c => c.name === selected.cohort) || cohorts[0];
+  const [selected, setSelected] = useState<PeerProfile | null>(null);
+
+  const selectedCohort = selected ? cohorts.find(c => c.name === selected.cohort) || cohorts[0] : cohorts[0];
+
+  if (!selected) return null;
 
   const riskColor = (level: string) =>
     level === 'Low' ? 'text-success' : level === 'Medium' ? 'text-warning' : 'text-destructive';
   const riskBg = (level: string) =>
     level === 'Low' ? 'border-success/30 bg-success/10' : level === 'Medium' ? 'border-warning/30 bg-warning/10' : 'border-destructive/30 bg-destructive/10';
 
-  const radarData = [
+  const radarData = selected ? [
     { metric: 'EMI Burden', borrower: selected.emiBurden, cohortAvg: Math.round(selectedCohort.avgScore * 0.8) },
     { metric: 'Savings', borrower: selected.savingsRatio, cohortAvg: 55 },
     { metric: 'Protection', borrower: selected.protectionScore, cohortAvg: 50 },
     { metric: 'UPI Risk', borrower: selected.upiRisk, cohortAvg: 25 },
     { metric: 'Overall Risk', borrower: selected.riskScore, cohortAvg: selectedCohort.avgScore },
-  ];
+  ] : [];
 
   const comparisonData = borrowerResults.map(b => ({
     name: b.name.split(' ')[0],
@@ -75,9 +87,9 @@ const PeerComparison = () => {
     cohortAvg: cohorts.find(c => c.name === b.cohort)?.avgScore || 40,
   }));
 
-  const percentile = Math.round(
+  const percentile = selected ? Math.round(
     (borrowerResults.filter(b => b.riskScore > selected.riskScore).length / borrowerResults.length) * 100
-  );
+  ) : 0;
 
   return (
     <div className="min-h-screen pt-24 pb-16">
@@ -95,7 +107,7 @@ const PeerComparison = () => {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.05 }}
-              className={`rounded-lg border p-3 shadow-card ${selected.cohort === c.name ? 'border-primary bg-primary/5' : 'border-border bg-card'}`}
+              className={`rounded-lg border p-3 shadow-card ${selected && selected.cohort === c.name ? 'border-primary bg-primary/5' : 'border-border bg-card'}`}
             >
               <div className="text-xs text-muted-foreground mb-1 truncate">{c.name.split('(')[0].trim()}</div>
               <div className="font-heading text-lg font-bold text-foreground">{c.avgScore}</div>

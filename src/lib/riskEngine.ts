@@ -2,9 +2,20 @@
 
 export interface PersonalInfo {
   name: string;
+  dob: string;
+  phone: string;
+  email: string;
+  gender: string;
+  nationality: string;
+  panNumber: string;
+  panName: string;
   age: number;
   occupation: string;
   city: string;
+  whatsappLinked: boolean;
+  whatsappVerified: boolean;
+  emailVerified: boolean;
+  phoneVerified: boolean;
 }
 
 export interface FinancialData {

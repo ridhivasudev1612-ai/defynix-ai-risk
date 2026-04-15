@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { loadCustomBorrowers } from '@/lib/storage';
 
 export interface RiskAlert {
   id: string;
   borrowerId: string;
   borrowerName: string;
-  channel: 'whatsapp' | 'sms';
+  channel: 'whatsapp' | 'sms' | 'email';
   type: 'threshold_breach' | 'score_change' | 'behavioral_flag' | 'protection_gap';
   severity: 'info' | 'warning' | 'critical';
   message: string;
   timestamp: Date;
   read: boolean;
+  sentTo?: string;
 }
 
 const mockAlerts: RiskAlert[] = [
@@ -28,9 +30,10 @@ const mockAlerts: RiskAlert[] = [
   },
   {
     id: 'ALT-003', borrowerId: 'BRW-001', borrowerName: 'Arjun Mehta',
-    channel: 'whatsapp', type: 'score_change', severity: 'info',
-    message: '📊 Monthly risk update: Arjun Mehta\'s score improved by 4 points (38→34). Cash flow stability increased due to higher savings balance.',
+    channel: 'email', type: 'score_change', severity: 'info',
+    message: '✉️ Email sent to arjun.mehta@example.com with the latest risk summary and recommended next steps.',
     timestamp: new Date(Date.now() - 600000), read: true,
+    sentTo: 'arjun.mehta@example.com',
   },
   {
     id: 'ALT-004', borrowerId: 'BRW-002', borrowerName: 'Priya Sharma',
@@ -46,9 +49,10 @@ const mockAlerts: RiskAlert[] = [
   },
   {
     id: 'ALT-006', borrowerId: 'BRW-004', borrowerName: 'Sneha Reddy',
-    channel: 'whatsapp', type: 'behavioral_flag', severity: 'critical',
-    message: '🔴 URGENT: Sneha Reddy — crypto transactions + late-night spending (35%) + no insurance. Combined risk signals indicate high default probability. Escalate to credit committee.',
+    channel: 'email', type: 'behavioral_flag', severity: 'critical',
+    message: '✉️ Email sent to sneha.reddy@example.com: crypto transactions + late-night spending flagged. Escalate to credit committee.',
     timestamp: new Date(Date.now() - 2400000), read: false,
+    sentTo: 'sneha.reddy@example.com',
   },
 ];
 
@@ -59,8 +63,62 @@ interface AlertsPanelProps {
 
 const AlertsPanel = ({ isOpen, onClose }: AlertsPanelProps) => {
   const [alerts, setAlerts] = useState<RiskAlert[]>(mockAlerts);
-  const [filter, setFilter] = useState<'all' | 'whatsapp' | 'sms'>('all');
+  const [filter, setFilter] = useState<'all' | 'whatsapp' | 'sms' | 'email'>('all');
   const [newAlert, setNewAlert] = useState<RiskAlert | null>(null);
+
+  // Add alerts for verified custom borrowers when the panel opens
+  useEffect(() => {
+    if (!isOpen) return;
+    const saved = loadCustomBorrowers();
+    if (!saved.length) return;
+
+    const customAlerts = saved.flatMap(latest => {
+      const alerts: RiskAlert[] = [];
+      if (latest.personal.emailVerified) {
+        alerts.push({
+          id: `ALT-CUST-EMAIL-${latest.id}`,
+          borrowerId: latest.id,
+          borrowerName: latest.personal.name,
+          channel: 'email',
+          type: 'score_change',
+          severity: 'info',
+          message: `✉️ Risk alert delivered to ${latest.personal.email} for ${latest.personal.name}.`,
+          timestamp: new Date(),
+          read: false,
+          sentTo: latest.personal.email,
+        });
+      }
+      if (latest.personal.phoneVerified) {
+        alerts.push({
+          id: `ALT-CUST-SMS-${latest.id}`,
+          borrowerId: latest.id,
+          borrowerName: latest.personal.name,
+          channel: 'sms',
+          type: 'threshold_breach',
+          severity: 'warning',
+          message: `📱 SMS sent to ${latest.personal.phone} for ${latest.personal.name}: urgent risk update from DEFYNIX.`,
+          timestamp: new Date(),
+          read: false,
+        });
+      }
+      if (latest.personal.whatsappLinked) {
+        alerts.push({
+          id: `ALT-CUST-WHATSAPP-${latest.id}`,
+          borrowerId: latest.id,
+          borrowerName: latest.personal.name,
+          channel: 'whatsapp',
+          type: 'behavioral_flag',
+          severity: 'critical',
+          message: `💬 WhatsApp message delivered to ${latest.personal.phone} for ${latest.personal.name}: risky UPI behaviour detected.`,
+          timestamp: new Date(),
+          read: false,
+        });
+      }
+      return alerts;
+    });
+
+    setAlerts(prev => [...customAlerts, ...prev.filter(alert => !alert.id.startsWith('ALT-CUST-'))]);
+  }, [isOpen]);
 
   // Simulate incoming alerts
   useEffect(() => {
@@ -151,13 +209,13 @@ const AlertsPanel = ({ isOpen, onClose }: AlertsPanelProps) => {
 
               {/* Channel filter */}
               <div className="flex gap-2 mb-5">
-                {(['all', 'whatsapp', 'sms'] as const).map(ch => (
+                {(['all', 'whatsapp', 'sms', 'email'] as const).map(ch => (
                   <button
                     key={ch}
                     onClick={() => setFilter(ch)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${filter === ch ? 'gradient-primary text-primary-foreground border-transparent' : 'bg-card text-muted-foreground border-border hover:text-foreground'}`}
                   >
-                    {ch === 'whatsapp' ? '💬 WhatsApp' : ch === 'sms' ? '📱 SMS' : 'All'}
+                    {ch === 'whatsapp' ? '💬 WhatsApp' : ch === 'sms' ? '📱 SMS' : ch === 'email' ? '✉️ Email' : 'All'}
                   </button>
                 ))}
               </div>
@@ -175,7 +233,7 @@ const AlertsPanel = ({ isOpen, onClose }: AlertsPanelProps) => {
                   >
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm">{alert.channel === 'whatsapp' ? '💬' : '📱'}</span>
+                        <span className="text-sm">{alert.channel === 'whatsapp' ? '💬' : alert.channel === 'sms' ? '📱' : '✉️'}</span>
                         <span className={`text-xs font-heading font-bold uppercase ${severityColor(alert.severity)}`}>
                           {alert.severity}
                         </span>
@@ -193,8 +251,10 @@ const AlertsPanel = ({ isOpen, onClose }: AlertsPanelProps) => {
                     <div className="flex items-center gap-1 mt-3 text-xs text-muted-foreground">
                       {alert.channel === 'whatsapp' ? (
                         <span className="text-primary">✓✓ Delivered via WhatsApp Business API</span>
-                      ) : (
+                      ) : alert.channel === 'sms' ? (
                         <span className="text-primary">✓ Sent via SMS Gateway</span>
+                      ) : (
+                        <span className="text-primary">✓ Sent via Email to {alert.sentTo ?? 'recipient'}</span>
                       )}
                     </div>
                   </motion.div>

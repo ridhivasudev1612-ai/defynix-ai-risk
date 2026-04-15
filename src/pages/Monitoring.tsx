@@ -1,27 +1,27 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { mockBorrowers } from '@/lib/mockData';
+import { loadCustomBorrowers, removeCustomBorrower } from '@/lib/storage';
 import { computeRisk, simulateWhatIf, type RiskResult, type AssessmentInput } from '@/lib/riskEngine';
 import RiskGauge from '@/components/RiskGauge';
 import RiskBreakdown from '@/components/RiskBreakdown';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
 const Monitoring = () => {
-  const [borrowerResults, setBorrowerResults] = useState<{ id: string; name: string; city: string; occupation: string; result: RiskResult }[]>([]);
+  const [borrowerResults, setBorrowerResults] = useState<{ id: string; input: AssessmentInput; result: RiskResult }[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [whatIfIncome, setWhatIfIncome] = useState<number>(0);
   const [whatIfResult, setWhatIfResult] = useState<RiskResult | null>(null);
   const [lastUpdate, setLastUpdate] = useState(new Date());
 
   useEffect(() => {
-    const results = mockBorrowers.map(b => ({
+    const saved = loadCustomBorrowers();
+    const combined = [...mockBorrowers, ...saved].map(b => ({
       id: b.id,
-      name: b.personal.name,
-      city: b.personal.city,
-      occupation: b.personal.occupation,
+      input: b,
       result: computeRisk(b),
     }));
-    setBorrowerResults(results);
+    setBorrowerResults(combined);
   }, []);
 
   // Simulate live updates
@@ -42,12 +42,18 @@ const Monitoring = () => {
   }, []);
 
   const selectedBorrower = borrowerResults.find(b => b.id === selected);
-  const selectedInput = mockBorrowers.find(b => b.id === selected);
+  const selectedInput = selectedBorrower?.input;
 
   const handleWhatIf = () => {
     if (!selectedInput || !whatIfIncome) return;
     const r = simulateWhatIf(selectedInput, { monthlyIncome: whatIfIncome });
     setWhatIfResult(r);
+  };
+
+  const handleDelete = (id: string) => {
+    setBorrowerResults(prev => prev.filter(b => b.id !== id));
+    removeCustomBorrower(id);
+    if (selected === id) setSelected(null);
   };
 
   const riskColor = (level: string) =>
@@ -106,14 +112,28 @@ const Monitoring = () => {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.05 }}
-                onClick={() => { setSelected(b.id); setWhatIfResult(null); setWhatIfIncome(0); }}
-                className={`rounded-lg border p-4 cursor-pointer transition-all ${selected === b.id ? 'border-primary bg-primary/5 shadow-glow' : 'border-border bg-card hover:border-primary/30'}`}
+                className={`rounded-lg border p-4 transition-all ${selected === b.id ? 'border-primary bg-primary/5 shadow-glow' : 'border-border bg-card hover:border-primary/30'}`}
               >
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <div className="font-heading font-semibold text-sm text-foreground">{b.name}</div>
-                    <div className="text-xs text-muted-foreground">{b.id} • {b.city}</div>
-                  </div>
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <button
+                    type="button"
+                    onClick={() => { setSelected(b.id); setWhatIfResult(null); setWhatIfIncome(0); }}
+                    className="text-left flex-1"
+                  >
+                    <div className="font-heading font-semibold text-sm text-foreground">{b.input.personal.name}</div>
+                    <div className="text-xs text-muted-foreground">{b.id} • {b.input.personal.city}</div>
+                    <div className="text-xs text-muted-foreground mt-1">{b.input.personal.email}</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(b.id)}
+                    className="rounded-lg border border-border bg-card px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
+                  >
+                    Delete
+                  </button>
+                </div>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-sm font-semibold text-foreground">{b.input.personal.occupation}</div>
                   <div className="text-right">
                     <div className="font-heading font-bold text-lg text-foreground">{b.result.totalScore}</div>
                     <div className={`text-xs font-semibold ${riskColor(b.result.riskLevel)}`}>{b.result.riskLevel}</div>
@@ -135,15 +155,27 @@ const Monitoring = () => {
           <div className="lg:col-span-2">
             {selectedBorrower ? (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-                <div className="flex items-start justify-between">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
-                    <h2 className="font-heading text-xl font-bold text-foreground">{selectedBorrower.name}</h2>
-                    <p className="text-sm text-muted-foreground">{selectedBorrower.occupation} • {selectedBorrower.city}</p>
+                    <h2 className="font-heading text-xl font-bold text-foreground">{selectedBorrower.input.personal.name}</h2>
+                    <p className="text-sm text-muted-foreground">{selectedBorrower.input.personal.occupation} • {selectedBorrower.input.personal.city}</p>
+                    <p className="text-sm text-muted-foreground mt-2">{selectedBorrower.input.personal.email} • {selectedBorrower.input.personal.phone}</p>
+                    <p className="text-sm text-muted-foreground">{selectedBorrower.input.personal.gender} • {selectedBorrower.input.personal.nationality}</p>
                   </div>
-                  <div className={`px-4 py-1.5 rounded-full text-xs font-heading font-bold border ${riskBg(selectedBorrower.result.riskLevel)} ${riskColor(selectedBorrower.result.riskLevel)}`}>
-                    {selectedBorrower.result.recommendation}
+                  <div className="flex flex-col items-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(selectedBorrower.id)}
+                      className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10"
+                    >
+                      Delete Borrower
+                    </button>
+                    <div className={`px-4 py-1.5 rounded-full text-xs font-heading font-bold border ${riskBg(selectedBorrower.result.riskLevel)} ${riskColor(selectedBorrower.result.riskLevel)}`}>
+                      {selectedBorrower.result.recommendation}
+                    </div>
                   </div>
                 </div>
+                <div className="text-xs text-muted-foreground">PAN: {selectedBorrower.input.personal.panNumber} • PAN name: {selectedBorrower.input.personal.panName}</div>
 
                 <div className="grid md:grid-cols-2 gap-6">
                   <div className="rounded-lg border border-border bg-card p-6 shadow-card flex justify-center">
