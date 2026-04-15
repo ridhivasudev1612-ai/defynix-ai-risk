@@ -19,7 +19,7 @@ const Assessment = () => {
     setData(d => ({ ...d, personal: { ...d.personal, [key]: value } }));
   const updateFinancial = (key: string, value: number) =>
     setData(d => ({ ...d, financial: { ...d.financial, [key]: value } }));
-  const updateUPI = (key: string, value: number | boolean) =>
+  const updateUPI = (key: string, value: number | boolean | string) =>
     setData(d => ({ ...d, upi: { ...d.upi, [key]: value } }));
   const updateInsurance = (key: string, value: boolean | number) =>
     setData(d => ({ ...d, insurance: { ...d.insurance, [key]: value } }));
